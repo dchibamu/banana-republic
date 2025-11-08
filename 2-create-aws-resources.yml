@@ -288,18 +288,21 @@ Resources:
 
           echo "=== Creating environment file with database connection ==="
           cat > .env.prod << EOF
-          DB_HOST=!GetAtt PostgreSQLDB.Endpoint.Address
+          DB_HOST=${PostgreSQLDB.Endpoint.Address}
           DB_PORT=5432
-          DB_USERNAME=!Ref DatabaseUsername
-          DB_PASSWORD=!Ref DatabasePassword
+          DB_USERNAME=${DatabaseUsername}
+          DB_PASSWORD=${DatabasePassword}
           DB_NAME=bananarepublic
           NODE_ENV=prod
           EOF
 
+          echo "=== Displaying environment file (without password) for verification ==="
+          cat .env | sed 's/DB_PASSWORD=.*/DB_PASSWORD=***/'
+
           echo "=== Building application ==="
           pnpm run build
           
-          echo "=== Starting application with PM2 ==="
+          echo "=== Starting application with pnpm ==="
           pnpm start
           
           echo "=== UserData completed successfully ==="
