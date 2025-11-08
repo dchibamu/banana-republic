@@ -180,7 +180,7 @@ Resources:
     Properties:
       DBInstanceIdentifier: !Sub ${AWS::StackName}-postgresql
       DBName: bananarepublic
-      DBInstanceClass: db.t3.micro
+      DBInstanceClass: db.t4g.micro
       Engine: postgres
       EngineVersion: "17.6"
       MasterUsername: !Ref DatabaseUsername
@@ -193,7 +193,7 @@ Resources:
       DBSubnetGroupName: !Ref DBSubnetGroup
       VPCSecurityGroups:
         - !GetAtt RDSSecurityGroup.GroupId
-      BackupRetentionPeriod: 7
+      BackupRetentionPeriod: 1
       DeletionProtection: false
       Tags:
         - Key: Name
