@@ -182,7 +182,7 @@ Resources:
       DBName: bananarepublic
       DBInstanceClass: db.t3.micro
       Engine: postgres
-      EngineVersion: "15.4"
+      EngineVersion: "17.6"
       MasterUsername: !Ref DatabaseUsername
       MasterUserPassword: !Ref DatabasePassword
       AllocatedStorage: 20
@@ -300,7 +300,7 @@ Resources:
           pnpm run build
           
           echo "=== Starting application with PM2 ==="
-          pnpm start:dev
+          pnpm start
           
           echo "=== UserData completed successfully ==="
 
