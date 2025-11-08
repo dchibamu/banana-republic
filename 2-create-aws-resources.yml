@@ -287,17 +287,18 @@ Resources:
           pnpm install
 
           echo "=== Creating environment file with database connection ==="
-          cat > .env.prod << EOF
-          DB_HOST=${PostgreSQLDB.Endpoint.Address}
-          DB_PORT=5432
-          DB_USERNAME=${DatabaseUsername}
-          DB_PASSWORD=${DatabasePassword}
-          DB_NAME=bananarepublic
-          NODE_ENV=prod
+          # Create .env.prod file using echo commands to avoid heredoc substitution issues
+          echo "DB_HOST=${PostgreSQLDB.Endpoint.Address}" > .env.prod
+          echo "DB_PORT=5432" >> .env.prod
+          echo "DB_USERNAME=${DatabaseUsername}" >> .env.prod
+          echo "DB_PASSWORD=${DatabasePassword}" >> .env.prod
+          echo "DB_NAME=bananarepublic" >> .env.prod
+          echo "NODE_ENV=production" >> .env.prod
           EOF
 
           echo "=== Displaying environment file (without password) for verification ==="
-          cat .env | sed 's/DB_PASSWORD=.*/DB_PASSWORD=***/'
+          echo "DB_HOST from env: \$(grep DB_HOST .env.prod | cut -d'=' -f2)"
+          echo "DB_USERNAME from env: \$(grep DB_USERNAME .env.prod | cut -d'=' -f2)"
 
           echo "=== Building application ==="
           pnpm run build

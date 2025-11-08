@@ -13,8 +13,9 @@ import { RestaurantService } from './restaurants/restaurant.service';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: process.env.NODE_ENV === 'dev' ? '.env.dev' : '.env.test',
-      ignoreEnvFile: process.env.NODE_ENV === 'prod',
+      envFilePath: '.env.prod',
+      //envFilePath: process.env.NODE_ENV === 'dev' ? '.env.dev' : '.env.test',
+      //ignoreEnvFile: process.env.NODE_ENV === 'prod',
       /*validate: config => {
         console.log('Loaded Config: ', config);
         return config;
