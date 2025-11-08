@@ -1,0 +1,398 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template to create an Ubuntu EC2 instance with PostgreSQL RDS'
+
+Parameters:
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.nano
+      - t2.micro
+      - t3.nano
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - m5.large
+      - m5.xlarge
+    ConstraintDescription: Must be a valid EC2 instance type.
+
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+
+  DatabasePassword:
+    Description: Password for the PostgreSQL database
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 41
+    ConstraintDescription: Must be at least 8 characters long.
+
+  DatabaseUsername:
+    Description: Username for the PostgreSQL database
+    Type: String
+    Default: postgres
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*"
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+
+Resources:
+  # VPC to launch the instance in
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.16.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-VPC
+
+  # Internet Gateway for public internet access
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-IGW
+
+  # Attach Internet Gateway to VPC
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public Subnet
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PublicSubnet
+
+  # Private Subnet for RDS
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.2.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnet1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.16.3.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnet2
+
+  # Route Table for Public Subnet
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PublicRT
+
+  # Public Route to Internet Gateway
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Associate Public Subnet with Route Table
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # Security Group for EC2 Instance
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access and HTTP from anywhere
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-EC2-SG
+
+  # Security Group for RDS Instance
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for PostgreSQL RDS
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-RDS-SG
+
+  # DB Subnet Group for RDS
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for PostgreSQL RDS
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-DBSubnetGroup
+
+  # PostgreSQL RDS Instance
+  PostgreSQLDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub ${AWS::StackName}-postgresql
+      DBName: bananarepublic
+      DBInstanceClass: db.t3.micro
+      Engine: postgres
+      EngineVersion: "15.4"
+      MasterUsername: !Ref DatabaseUsername
+      MasterUserPassword: !Ref DatabasePassword
+      AllocatedStorage: 20
+      MaxAllocatedStorage: 100
+      StorageType: gp3
+      PubliclyAccessible: false
+      MultiAZ: false
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+      BackupRetentionPeriod: 7
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PostgreSQL
+
+  # IAM Role for EC2 Instance
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Role
+
+  # IAM Instance Profile
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+      InstanceProfileName: !Sub ${AWS::StackName}-InstanceProfile
+
+  # EC2 Instance
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', HVM64]
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-Instance
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -e
+          exec > >(tee /var/log/user-data.log) 2>&1
+          
+          echo "=== Starting EC2 UserData Script ==="
+          
+          echo "=== Updating system packages ==="
+          apt-get update -y
+          apt-get upgrade -y
+
+          echo "=== Installing curl and git ==="
+          apt-get install -y curl git
+          
+          echo "=== Installing Node.js using NodeSource ==="
+          
+          # Install Node.js 22 from NodeSource (compatible with Ubuntu)
+          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          apt-get update -y
+          apt-get install -y nodejs
+          
+          echo "=== Node.js $(node --version) installed successfully ==="
+          
+          # Install pnpm
+          npm install -g pnpm
+          
+          # Install PM2
+          echo "===Set global directory==="
+          # Set the global bin directory
+          pnpm config set global-bin-dir /usr/local/bin
+
+          # Reload your shell
+          source ~/.bashrc
+          pnpm install -g pm2
+          echo "===Finished setting up==="
+          
+          echo "=== Creating app directory ==="
+          mkdir -p /home/ubuntu/app
+          cd /home/ubuntu/app
+          echo "Current directory after cd: $(pwd)"
+
+          echo "=== Cloning repository ==="
+          git clone --progress https://github.com/dchibamu/banana-republic.git .
+          
+          echo "=== Installing dependencies ==="
+          pnpm install
+
+          echo "=== Creating environment file with database connection ==="
+          cat > .env.prod << EOF
+          DB_HOST=!GetAtt PostgreSQLDB.Endpoint.Address
+          DB_PORT=5432
+          DB_USERNAME=!Ref DatabaseUsername
+          DB_PASSWORD=!Ref DatabasePassword
+          DB_NAME=bananarepublic
+          NODE_ENV=prod
+          EOF
+
+          echo "=== Building application ==="
+          pnpm run build
+          
+          echo "=== Starting application with PM2 ==="
+          pnpm start:dev
+          
+          echo "=== UserData completed successfully ==="
+
+  # Elastic IP for the instance (optional)
+  EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref EC2Instance
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-EIP
+
+# AMI Mapping for Ubuntu 22.04 LTS across different regions
+Mappings:
+  RegionMap:
+    af-south-1:
+      HVM64: ami-0a44b13e3947e5e6c
+    ap-east-1:
+      HVM64: ami-0e53d6e883122b82c
+    ap-northeast-1:
+      HVM64: ami-0d52744d6551d851e
+    ap-northeast-2:
+      HVM64: ami-0451c881e3b6a92f6
+    ap-northeast-3:
+      HVM64: ami-0b6b7e0d8e2d1c2f3
+    ap-south-1:
+      HVM64: ami-0f5ee92e2d63afc18
+    ap-southeast-1:
+      HVM64: ami-0fc5d935ebf8bc3bc
+    ap-southeast-2:
+      HVM64: ami-006a0bcc63c35c5e3
+    ca-central-1:
+      HVM64: ami-0a2e7efb4257c0901
+    eu-central-1:
+      HVM64: ami-04e601abe3e1a910f
+    eu-north-1:
+      HVM64: ami-0c0bc6c3c4370c35d
+    eu-south-1:
+      HVM64: ami-0b14b84e4c16b0a4c
+    eu-west-1:
+      HVM64: ami-049442a6cf8319180
+    eu-west-2:
+      HVM64: ami-0a0ff88d0f3f85a14
+    eu-west-3:
+      HVM64: ami-0f7cd40eac2214b37
+    me-south-1:
+      HVM64: ami-0d5c933a321c95a93
+    sa-east-1:
+      HVM64: ami-0e66f5495b4efdd0f
+    us-east-1:
+      HVM64: ami-08c40ec9ead489470
+    us-east-2:
+      HVM64: ami-024e6efaf93d85776
+    us-west-1:
+      HVM64: ami-0cbd7d6b6b52d707a
+    us-west-2:
+      HVM64: ami-017fecd1353bccbb8
+  
+Outputs:
+  InstanceId:
+    Description: Instance ID of the newly created EC2 instance
+    Value: !Ref EC2Instance
+    Export:
+      Name: !Sub ${AWS::StackName}-InstanceId
+
+  PublicIP:
+    Description: Public IP address of the newly created EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicIP
+
+  PublicDNS:
+    Description: Public DNS name of the newly created EC2 instance
+    Value: !GetAtt EC2Instance.PublicDnsName
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicDNS
+
+  DatabaseEndpoint:
+    Description: PostgreSQL database endpoint
+    Value: !GetAtt PostgreSQLDB.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-DatabaseEndpoint
+
+  DatabasePort:
+    Description: PostgreSQL database port
+    Value: !GetAtt PostgreSQLDB.Endpoint.Port
+    Export:
+      Name: !Sub ${AWS::StackName}-DatabasePort
+
+  WebsiteURL:
+    Description: URL for the website
+    Value: !Sub http://${EC2Instance.PublicDnsName}:3000
+    Export:
+      Name: !Sub ${AWS::StackName}-WebsiteURL
