@@ -177,6 +177,7 @@ Resources:
   # PostgreSQL RDS Instance
   PostgreSQLDB:
     Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
     Properties:
       DBInstanceIdentifier: !Sub ${AWS::StackName}-postgresql
       DBName: bananarepublic
@@ -193,11 +194,21 @@ Resources:
       DBSubnetGroupName: !Ref DBSubnetGroup
       VPCSecurityGroups:
         - !GetAtt RDSSecurityGroup.GroupId
-      BackupRetentionPeriod: 1
+      BackupRetentionPeriod: 0
       DeletionProtection: false
+      DBParameterGroupName: !Ref DBParameterGroup
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-PostgreSQL
+
+  # DB Parameter Group to configure PostgreSQL settings
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: postgres17
+      Description: PostgreSQL parameter group for application
+      Parameters:
+        rds.force_ssl: "0"
 
   # IAM Role for EC2 Instance
   EC2InstanceRole:
@@ -227,6 +238,7 @@ Resources:
   # EC2 Instance
   EC2Instance:
     Type: AWS::EC2::Instance
+    DependsOn: PostgreSQLDB
     Properties:
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
@@ -239,7 +251,7 @@ Resources:
         - Key: Name
           Value: !Sub ${AWS::StackName}-Instance
       UserData:
-        Fn::Base64: |
+        Fn::Base64: !Sub |
           #!/bin/bash
           set -e
           exec > >(tee /var/log/user-data.log) 2>&1
@@ -251,7 +263,7 @@ Resources:
           apt-get upgrade -y
 
           echo "=== Installing curl and git ==="
-          apt-get install -y curl git
+          apt-get install -y curl git netcat-traditional
           
           echo "=== Installing Node.js using NodeSource ==="
           
@@ -293,8 +305,20 @@ Resources:
           echo "DB_USERNAME=${DatabaseUsername}" >> .env.prod
           echo "DB_PASSWORD=${DatabasePassword}" >> .env.prod
           echo "DB_NAME=bananarepublic" >> .env.prod
-          echo "NODE_ENV=production" >> .env.prod
-          EOF
+          echo "NODE_ENV=prod" >> .env.prod
+
+          DB_HOST="${PostgreSQLDB.Endpoint.Address}"
+          until (echo > /dev/tcp/$DB_HOST/5432) >/dev/null 2>&1; do
+            echo "Database not ready yet, waiting..."
+            sleep 30
+          done
+
+          # echo "Database port is open! Waiting additional time for PostgreSQL to be fully ready..."
+
+          nc -zv "${PostgreSQLDB.Endpoint.Address}" 5432
+
+          echo "=== Displaying environment file (without password) for verification ==="
+          cat .env.prod | sed 's/DB_PASSWORD=.*/DB_PASSWORD=***/'
 
           echo "=== Displaying environment file (without password) for verification ==="
           echo "DB_HOST from env: \$(grep DB_HOST .env.prod | cut -d'=' -f2)"
